@@ -80,6 +80,8 @@ public class BootstrapApplicationListener
 	public static final String BOOTSTRAP_PROPERTY_SOURCE_NAME = "bootstrap";
 
 	/**
+	 * 最高优先级+5，{@link org.springframework.boot.context.config.ConfigFileApplicationListener}的优先级为最高优先级+10
+	 * 因此该监听器优先加载
 	 * The default order for this listener.
 	 */
 	public static final int DEFAULT_ORDER = Ordered.HIGHEST_PRECEDENCE + 5;
@@ -99,6 +101,7 @@ public class BootstrapApplicationListener
 			return;
 		}
 		// don't listen to events in a bootstrap context
+		// 父容器启动也会触发该方法，因此要检测环境里面是不是已经存在bootstrap属性，防止死循环
 		if (environment.getPropertySources().contains(BOOTSTRAP_PROPERTY_SOURCE_NAME)) {
 			return;
 		}
@@ -107,12 +110,14 @@ public class BootstrapApplicationListener
 				.resolvePlaceholders("${spring.cloud.bootstrap.name:bootstrap}");
 		for (ApplicationContextInitializer<?> initializer : event.getSpringApplication()
 				.getInitializers()) {
+			// 获取ParentContextApplicationContextInitializer的parent属性作为父容器
 			if (initializer instanceof ParentContextApplicationContextInitializer) {
 				context = findBootstrapContext(
 						(ParentContextApplicationContextInitializer) initializer,
 						configName);
 			}
 		}
+		// 父容器为空，则创建父容器
 		if (context == null) {
 			context = bootstrapServiceContext(environment, event.getSpringApplication(),
 					configName);
@@ -146,12 +151,21 @@ public class BootstrapApplicationListener
 		}
 	}
 
+	/**
+	 * 创建一个父容器
+	 * @param environment
+	 * @param application
+	 * @param configName
+	 * @return org.springframework.context.ConfigurableApplicationContext
+	 **/
 	private ConfigurableApplicationContext bootstrapServiceContext(
 			ConfigurableEnvironment environment, final SpringApplication application,
 			String configName) {
+		// 标准环境
 		StandardEnvironment bootstrapEnvironment = new StandardEnvironment();
 		MutablePropertySources bootstrapProperties = bootstrapEnvironment
 				.getPropertySources();
+		// 移除系统属性
 		for (PropertySource<?> source : bootstrapProperties) {
 			bootstrapProperties.remove(source.getName());
 		}
@@ -174,15 +188,20 @@ public class BootstrapApplicationListener
 			bootstrapMap.put("spring.config.additional-location",
 					configAdditionalLocation);
 		}
+		// 添加key为bootstrap的属性
 		bootstrapProperties.addFirst(
 				new MapPropertySource(BOOTSTRAP_PROPERTY_SOURCE_NAME, bootstrapMap));
+		// 设置属性
 		for (PropertySource<?> source : environment.getPropertySources()) {
+			// 因为父容器不是web容器，忽略servletConfigInitParams和servletContextInitParams
 			if (source instanceof StubPropertySource) {
 				continue;
 			}
+			// 把非StubPropertySource添加到后面
 			bootstrapProperties.addLast(source);
 		}
 		// TODO: is it possible or sensible to share a ResourceLoader?
+		// 通过SpringApplicationBuilder创建SpringApplication
 		SpringApplicationBuilder builder = new SpringApplicationBuilder()
 				.profiles(environment.getActiveProfiles()).bannerMode(Mode.OFF)
 				.environment(bootstrapEnvironment)
@@ -190,6 +209,7 @@ public class BootstrapApplicationListener
 				.registerShutdownHook(false).logStartupInfo(false)
 				.web(WebApplicationType.NONE);
 		final SpringApplication builderApplication = builder.application();
+		// 设置主应用类
 		if (builderApplication.getMainApplicationClass() == null) {
 			// gh_425:
 			// SpringApplication cannot deduce the MainApplicationClass here
@@ -200,15 +220,19 @@ public class BootstrapApplicationListener
 			// set by SpringBootServletInitializer itself already.
 			builder.main(application.getMainApplicationClass());
 		}
+		// 如果配置了刷新容器属性
 		if (environment.getPropertySources().contains("refreshArgs")) {
 			// If we are doing a context refresh, really we only want to refresh the
 			// Environment, and there are some toxic listeners (like the
 			// LoggingApplicationListener) that affect global static state, so we need a
 			// way to switch those off.
+			// 过滤LoggingApplicationListener、LoggingSystemShutdownListener类型的监听器，因为这些监听器涉及全局的静态变量？
 			builderApplication
 					.setListeners(filterListeners(builderApplication.getListeners()));
 		}
+		// 添加配置类
 		builder.sources(BootstrapImportSelectorConfiguration.class);
+		// 启动父容器
 		final ConfigurableApplicationContext context = builder.run();
 		// gh-214 using spring.application.name=bootstrap to set the context id via
 		// `ContextIdApplicationContextInitializer` prevents apps from getting the actual
@@ -216,10 +240,13 @@ public class BootstrapApplicationListener
 		// during the bootstrap phase.
 		context.setId("bootstrap");
 		// Make the bootstrap context a parent of the app context
+		// 设置父子上下文
 		addAncestorInitializer(application, context);
 		// It only has properties in it now that we don't want in the parent so remove
 		// it (and it will be added back later)
+		// 移除bootstrap属性
 		bootstrapProperties.remove(BOOTSTRAP_PROPERTY_SOURCE_NAME);
+		// 合并父子上下文相同的属性
 		mergeDefaultProperties(environment.getPropertySources(), bootstrapProperties);
 		return context;
 	}

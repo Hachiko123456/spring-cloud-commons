@@ -56,6 +56,7 @@ import org.springframework.util.StringUtils;
 import static org.springframework.core.env.StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME;
 
 /**
+ * 解析加载外部化配置属性
  * @author Dave Syer
  *
  */

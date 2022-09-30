@@ -29,6 +29,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
+ * 用于监听EnvironmentChangeEvent事件用于刷新@ConfigurationProperties标记的配置
  * Auto-configuration for {@link ConfigurationPropertiesRebinder}.
  *
  * @author Dave Syer
